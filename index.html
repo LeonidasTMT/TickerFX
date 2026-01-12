@@ -66,10 +66,17 @@ async function loadData() {
   infoDiv.textContent = "Starting…";
 
   try {
+    // Step 1: Fetch price data through AllOrigins proxy
     infoDiv.textContent = "Fetching price data…";
-    const priceUrl = `https://query1.finance.yahoo.com/v8/finance/chart/${ticker}?range=max&interval=1d`;
-    const priceRes = await fetch(priceUrl);
-    const priceJson = await priceRes.json();
+
+    const yahooUrl = `https://query1.finance.yahoo.com/v8/finance/chart/${ticker}?range=max&interval=1d`;
+    const proxyUrl = `https://api.allorigins.win/get?url=${encodeURIComponent(yahooUrl)}`;
+    
+    const priceRes = await fetch(proxyUrl);
+    if (!priceRes.ok) throw new Error("Failed to fetch price data from proxy");
+    
+    const priceText = await priceRes.text();
+    const priceJson = JSON.parse(JSON.parse(priceText).contents); // AllOrigins wraps JSON inside "contents"
     const result = priceJson.chart.result?.[0];
     if (!result) throw new Error("Ticker not found or no data");
 
@@ -90,13 +97,16 @@ async function loadData() {
     const startDate = priceTable[0].date;
     const endDate = priceTable[priceTable.length - 1].date;
 
+    // Step 2: Fetch FX data
     infoDiv.textContent = `Fetching FX data for ${detectedCurrency} → ${target}…`;
     const fxUrl = `https://api.exchangerate.host/timeseries?start_date=${startDate}&end_date=${endDate}&base=${detectedCurrency}&symbols=${target}`;
     const fxRes = await fetch(fxUrl);
+    if (!fxRes.ok) throw new Error("Failed to fetch FX data");
     const fxJson = await fxRes.json();
     if (!fxJson.rates) throw new Error("FX data not found");
 
-    infoDiv.textContent = "Processing FX and merging with price data…";
+    // Step 3: Build FX table with forward-fill
+    infoDiv.textContent = "Processing FX data and merging with price data…";
     let lastFx = null;
     const fxTable = {};
     Object.keys(fxJson.rates).sort().forEach(d => {
@@ -105,6 +115,7 @@ async function loadData() {
       if (lastFx != null) fxTable[d] = lastFx;
     });
 
+    // Step 4: Merge price and FX
     fullData = priceTable.filter(r => fxTable[r.date])
       .map(r => ({
         date: r.date,
@@ -113,8 +124,10 @@ async function loadData() {
         converted: r.price * fxTable[r.date]
       }));
 
+    // Step 5: Show detected currency and data range
     infoDiv.innerHTML = `Detected currency: <b>${detectedCurrency}</b> | Data since: <b>${firstDate.toISOString().slice(0,10)}</b>`;
-    
+
+    // Step 6: Populate table and plot chart
     populateTable();
     infoDiv.textContent += " | Plotting chart…";
     setRange('MAX');
