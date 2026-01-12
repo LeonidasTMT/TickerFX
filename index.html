@@ -2,210 +2,435 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Ticker in Local Currency</title>
 <script src="https://cdn.plot.ly/plotly-2.27.0.min.js"></script>
 <style>
-body { font-family: system-ui, sans-serif; max-width: 1000px; margin: 30px auto; }
-h1 { margin-bottom: 10px; }
-.controls { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 15px; }
-input, select, button { padding: 6px 10px; font-size: 14px; }
-.ranges button { margin-right: 5px; margin-bottom:5px; }
-#info { margin: 10px 0; color: #555; }
-#chart { margin-top: 20px; }
-#dataTable { display: none; margin-top: 20px; max-height: 300px; overflow-y: auto; border-collapse: collapse; width: 100%; }
-#dataTable th, #dataTable td { border: 1px solid #ddd; padding: 8px; text-align: right; }
-#dataTable th { background-color: #f2f2f2; }
-#measure { margin-top:10px; font-weight:bold; }
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; max-width: 1000px; margin: 30px auto; padding: 0 20px; color: #333; }
+    h1 { margin-bottom: 10px; }
+    .controls { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 15px; align-items: center; }
+    input, button { padding: 8px 12px; font-size: 14px; border: 1px solid #ccc; border-radius: 4px; }
+    button { cursor: pointer; background-color: #f0f0f0; transition: background 0.2s; }
+    button:hover { background-color: #e0e0e0; }
+    button.active { background-color: #007bff; color: white; border-color: #0066cc; }
+    
+    .ranges { margin-bottom: 15px; display: flex; flex-wrap: wrap; gap: 5px; }
+    
+    #status-area { margin: 15px 0; padding: 15px; background: #f8f9fa; border-radius: 6px; border-left: 4px solid #ccc; font-size: 0.95em; }
+    #status-area.error { border-left-color: #dc3545; background: #fff5f5; color: #dc3545; }
+    #status-area.success { border-left-color: #28a745; background: #f0fff4; }
+    #status-area.loading { border-left-color: #007bff; }
+    
+    /* Stats Bar */
+    .stats-bar { display: flex; gap: 20px; background: #f1f8ff; padding: 10px; border-radius: 5px; margin-bottom: 10px; font-size: 0.9em; border: 1px solid #d0e3f7; }
+    .stat-item strong { display: block; font-size: 0.8em; color: #666; text-transform: uppercase; }
+    .stat-value { font-weight: bold; font-size: 1.1em; }
+    .pos { color: #28a745; }
+    .neg { color: #dc3545; }
+
+    #measure-instruction { font-size: 0.85em; color: #666; margin-bottom: 5px; font-style: italic; }
+    #chart { margin-top: 0px; min-height: 450px; }
+    
+    .table-container { margin-top: 30px; display: none; }
+    #dataTable { width: 100%; border-collapse: collapse; font-size: 0.9em; }
+    #dataTable th, #dataTable td { border: 1px solid #ddd; padding: 8px; text-align: right; }
+    #dataTable th { background-color: #f2f2f2; text-align: right; position: sticky; top: 0; }
+    #dataTable tr:nth-child(even) { background-color: #f9f9f9; }
+    .scroll-box { max-height: 400px; overflow-y: auto; border: 1px solid #ddd; }
+
+    .spinner { display: inline-block; width: 12px; height: 12px; border: 2px solid rgba(0,0,0,0.1); border-radius: 50%; border-top-color: #007bff; animation: spin 1s ease-in-out infinite; margin-right: 8px; }
+    @keyframes spin { to { transform: rotate(360deg); } }
 </style>
 </head>
 <body>
 
 <h1>Ticker in Local Currency</h1>
 
+<div id="stock-info" style="display:none; margin-bottom: 15px; padding: 10px; background: #e8f4f8; border-radius: 5px; border-left: 4px solid #007bff;">
+    <div style="font-weight: bold; font-size: 1.1em;" id="info-name">-</div>
+    <div style="font-size: 0.9em; color: #555; margin-top: 5px;">
+        <span id="info-symbol">-</span> | 
+        <span>Base Currency: <strong id="info-currency">-</strong></span>
+    </div>
+</div>
+
 <div class="controls">
-  <input id="ticker" placeholder="VWRA.L">
-  <input id="targetCurrency" placeholder="Target currency (e.g., MYR)" style="width:150px;">
-  <button onclick="loadData()">Convert & Plot</button>
-  <button onclick="toggleTable()">Show/Hide Data</button>
+  <input id="ticker" placeholder="Ticker (e.g. VWRA.L)" value="VWRA.L">
+  <span>IN</span>
+  <input id="targetCurrency" placeholder="Currency (e.g. MYR)" style="width:100px;" value="MYR">
+  <button onclick="runApp()" id="btn-run">Convert & Plot</button>
+  <button onclick="toggleTable()">View Data Table</button>
 </div>
 
 <div class="ranges">
-  <button onclick="setRange('MAX')">Since inception</button>
-  <button onclick="setRange('5Y')">5Y</button>
-  <button onclick="setRange('1Y')">1Y</button>
-  <button onclick="setRange('YTD')">YTD</button>
-  <button onclick="setRange('6M')">6M</button>
-  <button onclick="setRange('3M')">3M</button>
+  <button onclick="setRange('MAX')" class="range-btn" data-range="MAX">Max</button>
+  <button onclick="setRange('5Y')" class="range-btn" data-range="5Y">5Y</button>
+  <button onclick="setRange('1Y')" class="range-btn" data-range="1Y">1Y</button>
+  <button onclick="setRange('YTD')" class="range-btn" data-range="YTD">YTD</button>
+  <button onclick="setRange('6M')" class="range-btn" data-range="6M">6M</button>
+  <button onclick="setRange('3M')" class="range-btn" data-range="3M">3M</button>
 </div>
 
-<div id="info"></div>
-<div id="measure"></div>
+<div id="status-area" style="display:none;"></div>
+
+<div class="stats-bar" id="statsBar" style="display:none;">
+    <div class="stat-item">
+        <strong>Period Start</strong>
+        <div class="stat-value" id="stat-start">-</div>
+    </div>
+    <div class="stat-item">
+        <strong>Period End</strong>
+        <div class="stat-value" id="stat-end">-</div>
+    </div>
+    <div class="stat-item">
+        <strong>Period Gain/Loss</strong>
+        <div class="stat-value" id="stat-change">-</div>
+    </div>
+</div>
+
+<div id="measure-instruction">💡 Click and drag on the chart to measure gain between any two specific points.</div>
 <div id="chart"></div>
 
-<table id="dataTable">
-  <thead>
-    <tr><th>Date</th><th>Original</th><th>FX Rate</th><th>Converted</th></tr>
-  </thead>
-  <tbody></tbody>
-</table>
+<div class="table-container" id="tableContainer">
+    <h3>Data (Last 30 Days)</h3>
+    <div class="scroll-box">
+        <table id="dataTable">
+            <thead>
+                <tr><th>Date</th><th>Stock Price</th><th>FX Rate</th><th>Converted Price</th></tr>
+            </thead>
+            <tbody></tbody>
+        </table>
+    </div>
+</div>
 
 <script>
-let fullData = [];
-let currentRange = 'MAX';
-let detectedCurrency = '';
+// --- Configuration ---
+const PROXY_URL = 'https://corsproxy.io/?'; 
+const YAHOO_BASE = 'https://query1.finance.yahoo.com/v8/finance/chart/';
 
-async function loadData() {
-  const ticker = document.getElementById('ticker').value.trim();
-  const target = document.getElementById('targetCurrency').value.trim().toUpperCase();
-  if (!ticker || !target) return alert("Enter ticker and target currency");
+// --- State ---
+let globalData = [];
+let stockMeta = { symbol: '', currency: '', shortName: '', longName: '' };
+let targetCurrency = '';
 
-  const infoDiv = document.getElementById('info');
-  const measureDiv = document.getElementById('measure');
-  measureDiv.textContent = "";
-  document.getElementById('dataTable').style.display = "none";
-  infoDiv.textContent = "Starting…";
-
-  try {
-    // Step 1: Fetch price data through AllOrigins proxy
-    infoDiv.textContent = "Fetching price data…";
-
-    const yahooUrl = `https://query1.finance.yahoo.com/v8/finance/chart/${ticker}?range=max&interval=1d`;
-    const proxyUrl = `https://api.allorigins.win/get?url=${encodeURIComponent(yahooUrl)}`;
+// --- Helpers ---
+const log = (msg, type = 'normal') => {
+    const el = document.getElementById('status-area');
+    el.style.display = 'block';
+    el.className = type;
     
-    const priceRes = await fetch(proxyUrl);
-    if (!priceRes.ok) throw new Error("Failed to fetch price data from proxy");
+    let icon = '';
+    if(type === 'loading') icon = '<div class="spinner"></div>';
+    if(type === 'error') icon = '❌ ';
+    if(type === 'success') icon = '✅ ';
     
-    const priceText = await priceRes.text();
-    const priceJson = JSON.parse(JSON.parse(priceText).contents); // AllOrigins wraps JSON inside "contents"
-    const result = priceJson.chart.result?.[0];
-    if (!result) throw new Error("Ticker not found or no data");
+    el.innerHTML = icon + msg;
+};
 
-    const timestamps = result.timestamp;
-    const prices = result.indicators.quote[0].close;
-    detectedCurrency = result.meta.currency;
-    const firstDate = new Date(result.meta.firstTradeDate * 1000);
+// --- Core Data Fetching ---
 
-    const priceTable = [];
-    for (let i = 0; i < timestamps.length; i++) {
-      if (prices[i] != null) {
-        priceTable.push({
-          date: new Date(timestamps[i] * 1000).toISOString().slice(0,10),
-          price: prices[i]
+async function fetchYahooSeries(symbol) {
+    const url = `${YAHOO_BASE}${symbol}?range=10y&interval=1d`;
+    const encodedUrl = PROXY_URL + encodeURIComponent(url);
+
+    try {
+        const response = await fetch(encodedUrl);
+        if (!response.ok) throw new Error(`HTTP error ${response.status}`);
+        const json = await response.json();
+        
+        const result = json.chart?.result?.[0];
+        if (!result) throw new Error(`No data found for ${symbol}`);
+
+        const timestamps = result.timestamp || [];
+        const quote = result.indicators?.quote?.[0] || {};
+        const adjClose = result.indicators?.adjclose?.[0]?.adjclose || [];
+        const close = quote.close || [];
+        
+        const priceArray = adjClose.length > 0 ? adjClose : close;
+        const currency = result.meta?.currency || 'USD';
+        const shortName = result.meta?.shortName || symbol;
+        const longName = result.meta?.longName || result.meta?.shortName || symbol;
+
+        const timeSeries = {};
+        const sortedDates = [];
+
+        timestamps.forEach((ts, i) => {
+            if (priceArray[i] != null) {
+                const date = new Date(ts * 1000).toISOString().split('T')[0];
+                timeSeries[date] = priceArray[i];
+                sortedDates.push(date);
+            }
         });
-      }
+
+        return { 
+            symbol: result.meta?.symbol, 
+            currency: currency,
+            shortName: shortName,
+            longName: longName,
+            data: timeSeries,
+            dates: sortedDates
+        };
+
+    } catch (e) {
+        console.error("Fetch Error:", e);
+        throw e;
     }
-    const startDate = priceTable[0].date;
-    const endDate = priceTable[priceTable.length - 1].date;
+}
 
-    // Step 2: Fetch FX data
-    infoDiv.textContent = `Fetching FX data for ${detectedCurrency} → ${target}…`;
-    const fxUrl = `https://api.exchangerate.host/timeseries?start_date=${startDate}&end_date=${endDate}&base=${detectedCurrency}&symbols=${target}`;
-    const fxRes = await fetch(fxUrl);
-    if (!fxRes.ok) throw new Error("Failed to fetch FX data");
-    const fxJson = await fxRes.json();
-    if (!fxJson.rates) throw new Error("FX data not found");
+// --- Main Application Logic ---
 
-    // Step 3: Build FX table with forward-fill
-    infoDiv.textContent = "Processing FX data and merging with price data…";
-    let lastFx = null;
-    const fxTable = {};
-    Object.keys(fxJson.rates).sort().forEach(d => {
-      const v = fxJson.rates[d][target];
-      if (v != null) lastFx = v;
-      if (lastFx != null) fxTable[d] = lastFx;
+async function runApp() {
+    const tickerInput = document.getElementById('ticker').value.trim().toUpperCase();
+    const currencyInput = document.getElementById('targetCurrency').value.trim().toUpperCase();
+    targetCurrency = currencyInput;
+
+    if (!tickerInput || !currencyInput) {
+        log("Please enter both a ticker and a target currency.", "error");
+        return;
+    }
+
+    log(`Fetching data for <b>${tickerInput}</b>...`, "loading");
+    document.getElementById('chart').innerHTML = '';
+    document.getElementById('statsBar').style.display = 'none';
+    
+    try {
+        // 1. Fetch Stock Data
+        const stockResult = await fetchYahooSeries(tickerInput);
+        stockMeta = { 
+            symbol: stockResult.symbol, 
+            currency: stockResult.currency,
+            shortName: stockResult.shortName,
+            longName: stockResult.longName
+        };
+        
+        // Update stock info display
+        document.getElementById('info-name').textContent = stockResult.longName;
+        document.getElementById('info-symbol').textContent = stockResult.symbol;
+        document.getElementById('info-currency').textContent = stockResult.currency;
+        document.getElementById('stock-info').style.display = 'block';
+        
+        log(`Found <b>${stockResult.symbol}</b> in <b>${stockResult.currency}</b>. fetching FX rates...`, "loading");
+
+        let fxData = {};
+        let inverted = false;
+
+        // 2. Determine and Fetch FX Data
+        if (stockResult.currency === targetCurrency) {
+            fxData = null; 
+        } else {
+            // Strategy A: Try Direct Pair
+            const pair1 = `${stockResult.currency}${targetCurrency}=X`;
+            try {
+                const fxResult = await fetchYahooSeries(pair1);
+                fxData = fxResult.data;
+            } catch (e) {
+                // Strategy B: Try Inverse Pair
+                const pair2 = `${targetCurrency}${stockResult.currency}=X`;
+                try {
+                    const fxResultInv = await fetchYahooSeries(pair2);
+                    fxData = fxResultInv.data;
+                    inverted = true;
+                } catch (e2) {
+                    throw new Error(`Could not find exchange rate for ${stockResult.currency} to ${targetCurrency}`);
+                }
+            }
+        }
+
+        // 3. Merge and Align Data
+        globalData = alignAndConvert(stockResult, fxData, inverted);
+
+        log(`Successfully converted ${stockMeta.symbol} to ${targetCurrency}.`, "success");
+        
+        // 4. Update Table and Chart
+        populateTable(globalData);
+        setRange('MAX'); 
+
+    } catch (err) {
+        log(err.message, "error");
+    }
+}
+
+function alignAndConvert(stockRes, fxMap, isInverted) {
+    const aligned = [];
+    let lastKnownFx = null;
+
+    stockRes.dates.forEach(date => {
+        const stockPrice = stockRes.data[date];
+        let fxRate = 1;
+
+        if (fxMap) {
+            let rawFx = fxMap[date];
+            // Fill Forward FX
+            if (rawFx == null && lastKnownFx !== null) {
+                rawFx = lastKnownFx;
+            }
+            if (rawFx != null) {
+                lastKnownFx = rawFx;
+                fxRate = isInverted ? (1 / rawFx) : rawFx;
+            } else {
+                return; // Skip if no FX rate (start of data hole)
+            }
+        }
+
+        aligned.push({
+            date: date,
+            original: stockPrice,
+            fx: fxRate,
+            converted: stockPrice * fxRate
+        });
     });
 
-    // Step 4: Merge price and FX
-    fullData = priceTable.filter(r => fxTable[r.date])
-      .map(r => ({
-        date: r.date,
-        original: r.price,
-        fx: fxTable[r.date],
-        converted: r.price * fxTable[r.date]
-      }));
-
-    // Step 5: Show detected currency and data range
-    infoDiv.innerHTML = `Detected currency: <b>${detectedCurrency}</b> | Data since: <b>${firstDate.toISOString().slice(0,10)}</b>`;
-
-    // Step 6: Populate table and plot chart
-    populateTable();
-    infoDiv.textContent += " | Plotting chart…";
-    setRange('MAX');
-    infoDiv.textContent += " ✅ Done";
-
-  } catch (err) {
-    infoDiv.textContent = `Error: ${err.message}`;
-    console.error(err);
-  }
+    return aligned;
 }
 
+// --- Visualization ---
 
 function setRange(range) {
-  currentRange = range;
-  if (!fullData.length) return;
+    // 1. Update Buttons
+    document.querySelectorAll('.range-btn').forEach(b => {
+        b.classList.remove('active');
+        if (b.getAttribute('data-range') === range) {
+            b.classList.add('active');
+        }
+    });
 
-  const now = new Date();
-  let start;
-  switch(range){
-    case '5Y': start = new Date(now.setFullYear(now.getFullYear()-5)); break;
-    case '1Y': start = new Date(now.setFullYear(now.getFullYear()-1)); break;
-    case '6M': start = new Date(now.setMonth(now.getMonth()-6)); break;
-    case '3M': start = new Date(now.setMonth(now.getMonth()-3)); break;
-    case 'YTD': start = new Date(new Date().getFullYear(),0,1); break;
-    default: start = null;
-  }
+    if (!globalData.length) return;
 
-  const view = start ? fullData.filter(r => new Date(r.date) >= start) : fullData;
-  plot(view);
+    // 2. Filter Data
+    let cutoff = new Date('1900-01-01');
+    const now = new Date();
+
+    if (range === '5Y') cutoff.setFullYear(now.getFullYear() - 5);
+    else if (range === '1Y') cutoff.setFullYear(now.getFullYear() - 1);
+    else if (range === '6M') {
+        cutoff = new Date(now);
+        cutoff.setMonth(now.getMonth() - 6);
+    }
+    else if (range === '3M') {
+        cutoff = new Date(now);
+        cutoff.setMonth(now.getMonth() - 3);
+    }
+    else if (range === 'YTD') cutoff = new Date(now.getFullYear(), 0, 1);
+
+    const filtered = globalData.filter(d => new Date(d.date) >= cutoff);
+    
+    // 3. Plot
+    plotChart(filtered);
+    
+    // 4. Update Stats for the View immediately
+    updateStats(filtered[0], filtered[filtered.length - 1]);
 }
 
-function plot(data){
-  const trace = {
-    x: data.map(r => r.date),
-    y: data.map(r => r.converted),
-    type: 'scatter',
-    mode: 'lines',
-    name: `Price in ${document.getElementById('targetCurrency').value}`
-  };
-
-  Plotly.newPlot('chart', [trace], {
-    title: `Value in ${document.getElementById('targetCurrency').value}`,
-    xaxis: { title: 'Date' },
-    yaxis: { title: 'Converted Price' },
-    dragmode: 'select'
-  });
-
-  // Attach selection listener for drag-to-measure
-  const measureDiv = document.getElementById('measure');
-  const y = trace.y;
-  const x = trace.x;
-
-  document.getElementById('chart').on('plotly_selected', function(eventData){
-    if(!eventData) return;
-    const indices = eventData.points.map(p=>p.pointIndex);
-    const startIdx = Math.min(...indices);
-    const endIdx = Math.max(...indices);
-    const startVal = y[startIdx], endVal = y[endIdx];
-    const pct = ((endVal - startVal)/startVal*100).toFixed(2);
-    measureDiv.textContent = `From ${x[startIdx]} to ${x[endIdx]}: Δ = ${((endVal-startVal).toFixed(2))}, % change = ${pct}%`;
-  });
+function updateStats(startPoint, endPoint) {
+    if (!startPoint || !endPoint) return;
+    
+    const startVal = startPoint.converted;
+    const endVal = endPoint.converted;
+    const diff = endVal - startVal;
+    const pct = (diff / startVal) * 100;
+    
+    const elStart = document.getElementById('stat-start');
+    const elEnd = document.getElementById('stat-end');
+    const elChange = document.getElementById('stat-change');
+    
+    elStart.innerText = `${startPoint.date}: ${startVal.toFixed(2)}`;
+    elEnd.innerText = `${endPoint.date}: ${endVal.toFixed(2)}`;
+    
+    const colorClass = diff >= 0 ? 'pos' : 'neg';
+    const sign = diff >= 0 ? '+' : '';
+    
+    elChange.innerHTML = `<span class="${colorClass}">${sign}${diff.toFixed(2)} (${sign}${pct.toFixed(2)}%)</span>`;
+    document.getElementById('statsBar').style.display = 'flex';
 }
 
-function populateTable(){
-  const tbody = document.querySelector("#dataTable tbody");
-  tbody.innerHTML = "";
-  fullData.forEach(r=>{
-    const tr = document.createElement('tr');
-    tr.innerHTML = `<td>${r.date}</td><td>${r.original.toFixed(2)} ${detectedCurrency}</td><td>${r.fx.toFixed(4)}</td><td>${r.converted.toFixed(2)}</td>`;
-    tbody.appendChild(tr);
-  });
+function plotChart(data) {
+    const x = data.map(d => d.date);
+    const y = data.map(d => d.converted);
+
+    const trace = {
+        x: x,
+        y: y,
+        mode: 'lines',
+        line: { color: '#007bff', width: 2 },
+        name: `${stockMeta.symbol} (${targetCurrency})`
+    };
+
+    const layout = {
+        title: { text: `${stockMeta.symbol} Price in ${targetCurrency}`, x: 0.05 },
+        margin: { t: 40, r: 20, l: 50, b: 40 },
+        xaxis: { showgrid: false },
+        yaxis: { title: targetCurrency, showgrid: true, gridcolor: '#eee' },
+        dragmode: 'select',
+        hovermode: 'x unified',
+        selectdirection: 'h'
+    };
+
+    const config = { responsive: true, displayModeBar: true, displaylogo: false };
+
+    Plotly.newPlot('chart', [trace], layout, config);
+
+    const chartDiv = document.getElementById('chart');
+
+    // Listener for Selection (Click and Drag)
+    chartDiv.on('plotly_selected', (eventData) => {
+        if (!eventData || !eventData.range) return;
+        
+        const xRange = eventData.range.x;
+        if (!xRange || xRange.length !== 2) return;
+        
+        // Find data points within the selected range
+        const startDate = new Date(xRange[0]);
+        const endDate = new Date(xRange[1]);
+        
+        const pointsInRange = data.filter(d => {
+            const date = new Date(d.date);
+            return date >= startDate && date <= endDate;
+        });
+        
+        if (pointsInRange.length >= 2) {
+            const startPoint = pointsInRange[0];
+            const endPoint = pointsInRange[pointsInRange.length - 1];
+            updateStats(startPoint, endPoint);
+        }
+    });
+    
+    // Listener for Double Click (Reset)
+    chartDiv.on('plotly_doubleclick', () => {
+       updateStats(data[0], data[data.length-1]);
+    });
 }
 
-function toggleTable(){
-  const tbl = document.getElementById('dataTable');
-  tbl.style.display = (tbl.style.display==='none') ? 'table' : 'none';
+// --- Table Logic ---
+function populateTable(data) {
+    const tbody = document.querySelector("#dataTable tbody");
+    tbody.innerHTML = "";
+    const recent = data.slice(-30).reverse();
+    
+    recent.forEach(row => {
+        const tr = document.createElement('tr');
+        tr.innerHTML = `
+            <td>${row.date}</td>
+            <td>${row.original.toFixed(2)} ${stockMeta.currency}</td>
+            <td>${row.fx.toFixed(4)}</td>
+            <td><b>${row.converted.toFixed(2)} ${targetCurrency}</b></td>
+        `;
+        tbody.appendChild(tr);
+    });
 }
+
+function toggleTable() {
+    const el = document.getElementById('tableContainer');
+    el.style.display = el.style.display === 'block' ? 'none' : 'block';
+}
+
+document.querySelectorAll('input').forEach(item => {
+    item.addEventListener('keypress', event => {
+        if (event.key === "Enter") runApp();
+    })
+});
+
+window.onload = runApp;
+
 </script>
-
 </body>
 </html>
