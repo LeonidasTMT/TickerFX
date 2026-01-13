@@ -57,9 +57,10 @@
 <div class="controls">
   <input id="ticker" placeholder="Ticker (e.g. AAPL)">
   <span>IN</span>
-  <input id="targetCurrency" placeholder="Currency (e.g. USD)" style="width:200px;">
+  <input id="targetCurrency" placeholder="Currency (e.g. USD)" style="width:120px;">
   <button onclick="runApp()" id="btn-run">Convert & Plot</button>
   <button onclick="toggleTable()">View Data Table</button>
+  <button onclick="toggleDualAxis()" id="btn-dual">Show Dual Currency</button>
 </div>
 
 <div class="ranges">
@@ -83,8 +84,12 @@
         <div class="stat-value" id="stat-end">-</div>
     </div>
     <div class="stat-item">
-        <strong>Period Gain/Loss</strong>
+        <strong id="stat-change-label">Period Gain/Loss</strong>
         <div class="stat-value" id="stat-change">-</div>
+    </div>
+    <div class="stat-item" id="stat-original-container" style="display:none;">
+        <strong id="stat-original-label">Original Currency</strong>
+        <div class="stat-value" id="stat-change-original">-</div>
     </div>
 </div>
 
@@ -112,6 +117,8 @@ const YAHOO_BASE = 'https://query1.finance.yahoo.com/v8/finance/chart/';
 let globalData = [];
 let stockMeta = { symbol: '', currency: '', shortName: '', longName: '' };
 let targetCurrency = '';
+let showDualAxis = false;
+let currentFilteredData = [];
 
 // --- Helpers ---
 const log = (msg, type = 'normal') => {
@@ -314,6 +321,9 @@ function setRange(range) {
 
     const filtered = globalData.filter(d => new Date(d.date) >= cutoff);
     
+    // Store for use in event handlers
+    currentFilteredData = filtered;
+    
     // 3. Plot
     plotChart(filtered);
     
@@ -332,6 +342,7 @@ function updateStats(startPoint, endPoint) {
     const elStart = document.getElementById('stat-start');
     const elEnd = document.getElementById('stat-end');
     const elChange = document.getElementById('stat-change');
+    const elChangeLabel = document.getElementById('stat-change-label');
     
     elStart.innerText = `${startPoint.date}: ${startVal.toFixed(2)}`;
     elEnd.innerText = `${endPoint.date}: ${endVal.toFixed(2)}`;
@@ -339,64 +350,160 @@ function updateStats(startPoint, endPoint) {
     const colorClass = diff >= 0 ? 'pos' : 'neg';
     const sign = diff >= 0 ? '+' : '';
     
+    elChangeLabel.textContent = `${targetCurrency} Gain/Loss`;
     elChange.innerHTML = `<span class="${colorClass}">${sign}${diff.toFixed(2)} (${sign}${pct.toFixed(2)}%)</span>`;
+    
+    // Show original currency stats if in dual mode
+    const elOriginalContainer = document.getElementById('stat-original-container');
+    if (showDualAxis && stockMeta.currency !== targetCurrency) {
+        const startOriginal = startPoint.original;
+        const endOriginal = endPoint.original;
+        const diffOriginal = endOriginal - startOriginal;
+        const pctOriginal = (diffOriginal / startOriginal) * 100;
+        
+        const colorClassOriginal = diffOriginal >= 0 ? 'pos' : 'neg';
+        const signOriginal = diffOriginal >= 0 ? '+' : '';
+        
+        document.getElementById('stat-original-label').textContent = `${stockMeta.currency} Gain/Loss`;
+        document.getElementById('stat-change-original').innerHTML = 
+            `<span class="${colorClassOriginal}">${signOriginal}${diffOriginal.toFixed(2)} (${signOriginal}${pctOriginal.toFixed(2)}%)</span>`;
+        
+        elOriginalContainer.style.display = 'block';
+    } else {
+        elOriginalContainer.style.display = 'none';
+    }
+    
     document.getElementById('statsBar').style.display = 'flex';
 }
 
 function plotChart(data) {
     const x = data.map(d => d.date);
-    const y = data.map(d => d.converted);
+    const yConverted = data.map(d => d.converted);
+    const yOriginal = data.map(d => d.original);
 
-    const trace = {
+    const traces = [{
         x: x,
-        y: y,
+        y: yConverted,
         mode: 'lines',
         line: { color: '#007bff', width: 2 },
-        name: `${stockMeta.symbol} (${targetCurrency})`
-    };
+        name: `${stockMeta.symbol} (${targetCurrency})`,
+        yaxis: 'y1'
+    }];
+
+    // Add second trace if dual axis is enabled
+    if (showDualAxis && stockMeta.currency !== targetCurrency) {
+        traces.push({
+            x: x,
+            y: yOriginal,
+            mode: 'lines',
+            line: { color: '#28a745', width: 2, dash: 'dot' },
+            name: `${stockMeta.symbol} (${stockMeta.currency})`,
+            yaxis: 'y2'
+        });
+    }
 
     const layout = {
         title: { text: `${stockMeta.symbol} Price in ${targetCurrency}`, x: 0.05 },
-        margin: { t: 40, r: 20, l: 50, b: 40 },
+        margin: { t: 40, r: showDualAxis ? 60 : 20, l: 50, b: 40 },
         xaxis: { showgrid: false },
-        yaxis: { title: targetCurrency, showgrid: true, gridcolor: '#eee' },
+        yaxis: { 
+            title: targetCurrency, 
+            showgrid: true, 
+            gridcolor: '#eee',
+            side: 'left'
+        },
         dragmode: 'select',
-        hovermode: 'x unified',
+        hovermode: 'closest',
         selectdirection: 'h'
     };
 
+    // Add second y-axis if dual currency mode
+    if (showDualAxis && stockMeta.currency !== targetCurrency) {
+        layout.yaxis2 = {
+            title: stockMeta.currency,
+            overlaying: 'y',
+            side: 'right',
+            showgrid: false
+        };
+    }
+
     const config = { responsive: true, displayModeBar: true, displaylogo: false };
 
-    Plotly.newPlot('chart', [trace], layout, config);
+    Plotly.newPlot('chart', traces, layout, config);
 
     const chartDiv = document.getElementById('chart');
 
-    // Listener for Selection (Click and Drag)
+    // Listener for Selection (Click and Drag) - with snap to nearest date
     chartDiv.on('plotly_selected', (eventData) => {
         if (!eventData || !eventData.range) return;
         
         const xRange = eventData.range.x;
         if (!xRange || xRange.length !== 2) return;
         
-        // Find data points within the selected range
+        // Find nearest data points by snapping to closest dates
         const startDate = new Date(xRange[0]);
         const endDate = new Date(xRange[1]);
         
-        const pointsInRange = data.filter(d => {
-            const date = new Date(d.date);
-            return date >= startDate && date <= endDate;
-        });
+        // Find the closest actual data point to start
+        let startPoint = data[0];
+        let minStartDiff = Math.abs(new Date(data[0].date) - startDate);
         
-        if (pointsInRange.length >= 2) {
-            const startPoint = pointsInRange[0];
-            const endPoint = pointsInRange[pointsInRange.length - 1];
-            updateStats(startPoint, endPoint);
+        for (let i = 1; i < data.length; i++) {
+            const diff = Math.abs(new Date(data[i].date) - startDate);
+            if (diff < minStartDiff) {
+                minStartDiff = diff;
+                startPoint = data[i];
+            } else {
+                break; // Data is sorted, so we can stop
+            }
         }
+        
+        // Find the closest actual data point to end
+        let endPoint = data[data.length - 1];
+        let minEndDiff = Math.abs(new Date(data[data.length - 1].date) - endDate);
+        
+        for (let i = data.length - 2; i >= 0; i--) {
+            const diff = Math.abs(new Date(data[i].date) - endDate);
+            if (diff < minEndDiff) {
+                minEndDiff = diff;
+                endPoint = data[i];
+            } else {
+                break;
+            }
+        }
+        
+        updateStats(startPoint, endPoint);
+        
+        // Add visual markers at the snapped positions
+        const shapes = [
+            {
+                type: 'line',
+                x0: startPoint.date,
+                x1: startPoint.date,
+                y0: 0,
+                y1: 1,
+                yref: 'paper',
+                line: { color: '#ff6b6b', width: 2, dash: 'dash' }
+            },
+            {
+                type: 'line',
+                x0: endPoint.date,
+                x1: endPoint.date,
+                y0: 0,
+                y1: 1,
+                yref: 'paper',
+                line: { color: '#ff6b6b', width: 2, dash: 'dash' }
+            }
+        ];
+        
+        Plotly.relayout(chartDiv, { shapes: shapes });
     });
     
     // Listener for Double Click (Reset)
     chartDiv.on('plotly_doubleclick', () => {
        updateStats(data[0], data[data.length-1]);
+       // Clear the visual markers
+       Plotly.relayout(chartDiv, { shapes: [] });
     });
 }
 
@@ -421,6 +528,26 @@ function populateTable(data) {
 function toggleTable() {
     const el = document.getElementById('tableContainer');
     el.style.display = el.style.display === 'block' ? 'none' : 'block';
+}
+
+function toggleDualAxis() {
+    if (!globalData.length) return;
+    
+    showDualAxis = !showDualAxis;
+    const btn = document.getElementById('btn-dual');
+    
+    if (showDualAxis) {
+        btn.classList.add('active');
+        btn.textContent = 'Hide Dual Currency';
+    } else {
+        btn.classList.remove('active');
+        btn.textContent = 'Show Dual Currency';
+    }
+    
+    // Redraw chart with current filtered data
+    if (currentFilteredData.length > 0) {
+        plotChart(currentFilteredData);
+    }
 }
 
 document.querySelectorAll('input').forEach(item => {
